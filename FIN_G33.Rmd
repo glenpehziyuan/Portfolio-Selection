@@ -1,0 +1,709 @@
+---
+title: "BT2201_Finance"
+author: |
+  | Glen Peh Ziyuan
+  | Chang Zhe Ming
+  | Teo Yee Hui
+  | Tan Ze En
+  | Matthew Robinson
+date: "15/4/2022"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r setup1, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library("xts")
+library("PerformanceAnalytics")
+library("kableExtra")
+library(readxl)
+library(ggplot2)
+library(fPortfolio)
+library(quantmod)
+library(purrr)
+library(tidyquant)
+library(kableExtra)
+
+data_core <- read_excel("ETFfxReturns.xlsx", sheet = "Static", skip=2)
+data_matrix <- read_excel("ETFfxReturns.xlsx", sheet = "Matrix", skip=2)
+data_returns <- read_excel("ETFfxReturns.xlsx", sheet = "Returns", skip=2)
+data_fx <- read_excel("ETFfxReturns.xlsx", sheet = "FX", skip=2)
+```
+
+\newpage
+## Executive Summary
+
+Our portfolio comprises a range of ETFs that give Japanese retail investors broad exposure to foreign and domestic assets. Due to broad diversification, we will assume in this report that idiosyncratic risk has been diversified and can be neglected. As such, we employ the Capital Asset Pricing Model to determine the returns of our ETFs. We conducted portfolio optimisation and have selected three different portfolios that have varying risk and returns to meet the needs of the Japanese investors.
+
+\newpage
+
+## Core Characteristics of chosen ETFs
+
+```{r fee, include=FALSE, warning=FALSE}
+bar_fees <- ggplot(data=data_core,aes(x=ETF,y=Fees)) +
+  geom_bar(stat="identity",fill="dodgerblue")+
+  geom_text(aes(label=Fees),vjust=2,color="white",size=2)+
+  xlab("ETFs")+ylab("Fees")+
+  ggtitle("ETF fees")
+bar_fees
+```
+
+```{r liquidity, include=FALSE, warning = FALSE}
+bar_liquidity <- ggplot(data=data_core,aes(x=ETF,y=ADV30)) +
+  geom_bar(stat="identity",fill="dodgerblue")+
+  xlab("ETFs")+ylab("Average Daily Volume")+
+  ggtitle("ETF ADV")
+bar_liquidity
+```
+
+```{r te, out.height="700px",include=FALSE, warning=FALSE}
+bar_benchmark <- ggplot(data=data_core,aes(x=ETF,y=`TE`)) +
+  geom_bar(stat="identity",fill="dodgerblue")+
+  xlab("ETFs")+ylab("Median Tracking Error")+
+  ggtitle("Median Tracking Error of ETFs for 12 Months")
+  
+bar_benchmark
+```
+
+```{r benchmark, out.height="700px", include=FALSE, warning=FALSE}
+bar_benchmark <- ggplot(data=data_core,aes(x=ETF,y=`Benchmark(5Y)`)) +
+  geom_bar(stat="identity",fill="dodgerblue")+
+  xlab("ETFs")+ylab("Benchmark(%)")+
+  ggtitle("ETFs Perfomance against Benchmark for 5 Years")
+  
+bar_benchmark
+
+```
+
+```{r currency, include=FALSE, warning=FALSE}
+data.ret <- xts(data_fx[,7], 
+    order.by = as.Date(data_fx$x)
+                   )
+#cumulative returns of USD JPY
+chart.CumReturns(data.ret, colorset = "dodgerblue")
+
+```
+
+```{r capmMean, out.height="700px", include=FALSE}
+names <- c("AGG", "SCHP", "VCSH", "BNDX", "VWOB", "1306", "VOO", "VO", "VSS", "VGK", "VWO", "1343", "VNQ", "VNQI", "IAU", "BCI")
+
+betas <- rep(0,16)
+alphas <- rep(0,16)
+avgReturns <- rep(0,16)
+capm <- rep(0,16)
+epsilons <- rep(0,16)
+
+Rm <- data_returns$mkt - data_returns$rf
+jp <- c(6,12)
+for(j in 1:16){
+  if (!(j %in% jp)) {
+  Rj <- as.numeric(unlist((((1 + data_returns[,3+j]) * ( 1 + data_fx[,7])) - 1))) - as.numeric(unlist(data_returns[,3]))
+} else {
+   Rj <- as.numeric(unlist(data_returns[,3+j])) - as.numeric(unlist(data_returns[,3]))
+}
+  result <- lm(Rj ~ Rm)
+  epsilons[j] <- sigma(result)
+  result_summary <- summary(result)
+  coefficents <- coef(result_summary)
+  betas[j] <- coefficents[2,1]
+  alphas[j] <- coefficents[1,1]
+  capm[j] <- alphas[j] + betas[j] * mean(Rm)
+}
+names(capm) <- names
+names(betas) <- names
+names(alphas) <- names
+names(epsilons) <- names
+
+capm_new <- cbind(capm)
+table <- kable(capm_new, col.names = c("mu CAPM"))
+table
+```
+
+We focus our investigation on the fees, Average Trading Volume, Tracking Error, ETF Performance Against Benchmark and the Currency Rate and the CAPM returns.
+
+### Fees
+
+In 2019, ETFs across the globe had an average expense ratio of 0.44% per annum (pa). This means that for every \$1,000 invested in an ETF, unitholders will incur an annual fee of \$4.40.
+
+In general, our chosen ETFs have a much lower fee, with the highest being 0.25% for BCI and IAU. Hence, we believe that this will attract Japanese investors to invest their money in our product.
+
+### Liquidity
+
+The primary factors that influence an ETF's liquidity are the composition of the ETF and the trading volume of the individual securities that make up the ETF. 
+
+The ETFs that we have chosen have considerably high liquidity which helps to ensure the bid and ask spread remains low for our investors.
+
+### CAPM
+
+Our ETFs selection give Japanese investors the opportunity to be exposed to varying asset classes such as bonds, stocks and commodities. We have also included assets located in developed markets and emerging markets such as Taiwan and South Africa. We converted the returns according to the currency exchange rate (refer to Appendix)
+
+We believe that our portfolio is well diversified and so we will assume that idiosyncratic risk is being diversified. We will also assume our Japanese investors are risk averse and will be more appealed to the mean variant efficent portfolios.
+
+```{r matrix, echo=FALSE}
+#use the capm from above
+library(kableExtra)
+matrix <- cbind(data_matrix, capm)
+kable(matrix[c(-1)], 
+      col.names = c("Benchmark", "Benchmark (5Y)", "Tracking Error", "Fees", "Currency", "ADV30", "mu CAPM"),
+      format="latex",
+      booktabs=TRUE) %>%
+  #kable_styling(latex_options="scale_down") %>%
+  column_spec(1,width = "0.4in") %>%
+  column_spec(2,width = "1.5in") %>%
+  column_spec(3,width = "0.6in") %>%
+  column_spec(4,width = "0.4in")
+```
+
+\newpage
+
+## Portfolio 
+```{r Convert to currency-adjusted returns, include=FALSE }
+jp <- c(6,12)
+# jp equity is the 6th and 12th
+converted_returns <- data_returns[,1:3]
+# converted_returns
+for (j in 1:16) {
+  if (!(j %in% jp)) {
+    # if jp equity then convert
+    Rj <- as.numeric(unlist((((1 + data_returns[,3+j]) * ( 1 + data_fx[,7])) - 1))) - as.numeric(unlist(data_returns[,3]))
+  } else {
+       Rj <- as.numeric(unlist(data_returns[,3+j])) - as.numeric(unlist(data_returns[,3]))
+  }
+  m1 <- matrix(Rj)
+  colnames(m1) <- paste(colnames(data_returns[,3 + j])  , "converted", sep=" ")
+  converted_returns <- cbind(converted_returns,m1)
+}
+
+target.rows <- ceiling(nrow(converted_returns) * 0.8)
+target.rows2 <- ceiling(target.rows + ceiling(nrow(converted_returns) * 0.1))
+
+full.sample <- converted_returns[target.rows : nrow(converted_returns), ]
+full.sample[is.na(full.sample)] <- 0
+
+start <- target.rows
+stop <- target.rows2 - 1
+test.sample <- converted_returns[start : stop, ]
+test.sample[is.na(test.sample)] <- 0
+
+start <- target.rows2 + 1
+stop <- nrow(converted_returns)
+test.sample2 <- converted_returns[(target.rows2 + 1) : nrow(converted_returns), ]
+test.sample2[is.na(test.sample2)] <- 0
+
+ETF_ret <- as.timeSeries(converted_returns[,c(-1,-2,-3, -11)], order.by = as.Date(converted_returns$x, "%Y-%m-%d"))
+# ETF_ret[is.na(ETF_ret)] <- 0
+names <- c("AGG", "SCHP", "VCSH", "BNDX", "VWOB", "1306", "VOO", "VSS", "VGK", "VWO", "1343", "VNQ", "VNQI", "IAU", "BCI")
+colnames(ETF_ret) <- names
+# ETF_ret
+```
+
+```{r effect frontier, include=FALSE}
+spec <- portfolioSpec()
+setNFrontierPoints(spec) <- 100
+constraints <- c("minW[1:15]=0.01", "maxW[1:15]=0.5")
+effFrontier <- portfolioFrontier(ETF_ret, spec = spec, constraints = constraints)
+
+# Make a plot selection (or 0 to exit): 
+# 
+# 1:   Plot Efficient Frontier
+# 2:   Add Minimum Risk Portfolio
+# 3:   Add Tangency Portfolio
+# 4:   Add Risk/Return of Single Assets
+# 5:   Add Equal Weights Portfolio
+# 6:   Add Two Asset Frontiers [LongOnly Only]
+# 7:   Add Monte Carlo Portfolios
+# 8:   Add Sharpe Ratio [Markowitz PF Only]
+
+plot(effFrontier, c(1, 2, 3, 5, 7))
+
+# Plot Frontier Weights (Can adjust number of points)
+frontierWeights <- getWeights(effFrontier) #get allocations for each instrument for each point on the efficient frontier
+colnames(frontierWeights) <- names
+write.csv(frontierWeights, "frontier_weights.csv")
+risk_return <- frontierPoints(effFrontier)
+# write.csv(risk_return, "risk_return.csv")
+
+#output correlation and covariance matrix
+cor_matrix <- cor(ETF_ret)
+cov_matrix <- cov(ETF_ret)
+# write.csv(cov_matrix, "covmatrix.csv")
+
+#Annualize Data
+riskReturnPoints <- frontierPoints(effFrontier) # get risk and return values for points on the efficient frontier
+annualizedPoints <- data.frame(targetRisk=riskReturnPoints[, "targetRisk"] * sqrt(252),
+                               targetReturn=riskReturnPoints[, "targetReturn"] * sqrt(252))
+plot(annualizedPoints)
+
+# plot Sharpe ratios for each point on the efficient frontier
+riskFreeRate <- -0.00116
+
+plot((annualizedPoints[, "targetReturn"]-riskFreeRate) / annualizedPoints[, "targetRisk"], 
+     xlab = "point on efficient frontier", 
+     ylab = "Sharpe ratio")
+
+#Plot frontier weights
+barplot(t(frontierWeights), main="Frontier Weights", col=cm.colors(ncol(frontierWeights)+2), legend=colnames(frontierWeights))
+
+# Get minimum variance portfolio
+spec <- portfolioSpec()
+setRiskFreeRate(spec) <- riskFreeRate
+mvp <- minriskPortfolio(ETF_ret, spec = spec, constraints = constraints)
+mvpWeights <- getWeights(mvp)
+#barplot(mvpWeights, main="MVP Weights", col=mvpWeights, legend=colnames(mvpWeights))
+
+# Get tangency portfolio
+spec <- portfolioSpec()
+setRiskFreeRate(spec) <- riskFreeRate
+tangencyPort <- tangencyPortfolio(ETF_ret, spec = spec, constraints = constraints)
+tangencyWeights <- getWeights(tangencyPort)
+
+# Get max returns portfolio weights
+maxWeights <- frontierWeights[50, ]
+
+# Visualizing portfolios on frontier
+plot(effFrontier, c(1, 2, 3, 5, 7))
+points(riskReturnPoints[50], riskReturnPoints[50, "targetReturn"], col="green", pch=16, cex=1)
+
+```
+
+```{r data for all etf, echo=FALSE}
+ETF_ret_all <- as.timeSeries(converted_returns[,c(-1,-2,-3)], order.by = as.Date(converted_returns$x, "%Y-%m-%d"))
+# ETF_ret[is.na(ETF_ret)] <- 0
+names <- c("AGG", "SCHP", "VCSH", "BNDX", "VWOB", "1306", "VOO", "VO", "VSS", "VGK", "VWO", "1343", "VNQ", "VNQI", "IAU", "BCI")
+colnames(ETF_ret_all) <- names
+# ETF_ret_all
+```
+
+We have three portfolios of varying risk and returns. 
+
+Firstly, we have the "aggressive" portfolio with higher risk and returns.
+
+``` {r Plots for Maximum Returns, out.height = "200px", echo=FALSE}
+maxWeights[7] <- 0.005
+maxWeights <- append(maxWeights, 0.005, 7)
+
+# a <- barplot(maxWeights,
+# main = "Maximum Returns Portfolio Weight",
+# names.arg = names,
+# col = "darkred",
+# horiz = TRUE,
+# xlim = c(0, 0.4),
+# las = 1)
+# # text(a, maxWeights)
+
+maxi <- data.frame(maxWeights)
+maxi_plot <- ggplot(data=maxi,aes(x=names,y=maxWeights*100)) +
+  geom_bar(stat="identity",fill="#00AFBB")+
+  geom_text(aes(label=round(maxWeights*100,2)), vjust=-0.3, size=3.5)+
+  theme_minimal()+
+  ylab("Percentage")+xlab("")+
+  ggtitle("Maximum Returns Portfolio Weight")
+maxi_plot
+```
+
+```{r Plots for Maximum Returns2, out.height = "200px", echo=FALSE}
+FI <- sum(maxWeights[c(1, 2, 3, 4, 5)])
+EQ <- sum(maxWeights[c(6, 7, 8, 9, 10, 11)])
+REIT <- sum(maxWeights[c(12, 13, 14)])
+GOLD <- sum(maxWeights[c(15)])
+COM <- sum(maxWeights[c(16)])
+
+slice <- c(FI, EQ, REIT, GOLD, COM)
+weight.piepercent <- round(100*slice, 2)
+label <- c("FI", "EQ", "REIT", "GOLD", "COM")
+label <- paste(label, ",", sep = "")
+label <- paste(label, weight.piepercent)
+label <- paste(label, "%", sep="")
+pie(slice, labels = label, main = "Maximum Returns Portfolio Weight")
+```
+
+\newpage
+
+Next, we have the "moderate" portfolio with medium risk and returns. 
+
+```{r Tangency Returns, out.height = "200px", echo=FALSE}
+tangencyWeights[7] <- 0.005
+tangencyWeights <- append(tangencyWeights, 0.005, 7)
+
+# b <- barplot(tangencyWeights,
+# main = "Tangency Returns Portfolio Weight",
+# names.arg = names,
+# col = "darkred",
+# horiz = TRUE,
+# xlim = c(0, 0.4),
+# las = 1)
+
+tan <- data.frame(tangencyWeights)
+tan_plot <- ggplot(data=tan,aes(x=names,y=tangencyWeights*100)) +
+  geom_bar(stat="identity",fill="#00AFBB")+
+  geom_text(aes(label=round(tangencyWeights*100,2)), vjust=-0.3, size=3.5)+
+  theme_minimal()+
+  ylab("Percentage")+xlab("")+
+  ggtitle("Tangency Returns Portfolio Weight")
+tan_plot
+```
+
+```{r Tangency Returns2, out.height = "200px", echo=FALSE}
+FI <- sum(tangencyWeights[c(1, 2, 3, 4, 5)])
+EQ <- sum(tangencyWeights[c(6, 7, 8, 9, 10, 11)])
+REIT <- sum(tangencyWeights[c(12, 13, 14)])
+GOLD <- sum(tangencyWeights[c(15)])
+COM <- sum(tangencyWeights[c(16)])
+
+slice <- c(FI, EQ, REIT, GOLD, COM)
+weight.piepercent <- round(100*slice, 2)
+label <- c("FI", "EQ", "REIT", "GOLD", "COM")
+label <- paste(label, ",", sep = "")
+label <- paste(label, weight.piepercent)
+label <- paste(label, "%", sep="")
+pie(slice, labels = label, main = "Tangency Returns Portfolio Weight")
+```
+
+\newpage
+
+Lastly, we have the "conservative" portfolio with the minimum risk. 
+
+``` {r Plots for Minimum Variance1, out.height = "200px", echo=FALSE}
+mvpWeights[7] <- 0.005
+mvpWeights <- append(mvpWeights, 0.005, 7)
+
+# c <- barplot(mvpWeights,
+# main = "GMVP Portfolio Weight",
+# names.arg = names,
+# col = "darkred",
+# horiz = TRUE,
+# xlim = c(0, 0.4),
+# las = 1)
+
+mvp <- data.frame(mvpWeights)
+mvp_plot <- ggplot(data=mvp,aes(x=names,y=mvpWeights*100)) +
+  geom_bar(stat="identity",fill="#00AFBB")+
+  geom_text(aes(label=round(mvpWeights*100,2)), vjust=-0.3, size=3.5)+
+  theme_minimal()+
+  ylab("Percentage")+xlab("")+
+  ggtitle("GMVP Portfolio Weight")
+mvp_plot
+```
+
+``` {r Plots for Minimum Variance, out.height = "200px", echo=FALSE}
+FI <- sum(mvpWeights[c(1, 2, 3, 4, 5)])
+EQ <- sum(mvpWeights[c(6, 7, 8, 9, 10, 11)])
+REIT <- sum(mvpWeights[c(12, 13, 14)])
+GOLD <- sum(mvpWeights[c(15)])
+COM <- sum(mvpWeights[c(16)])
+
+slice <- c(FI, EQ, REIT, GOLD, COM)
+weight.piepercent <- round(100*slice, 2)
+label <- c("FI", "EQ", "REIT", "GOLD", "COM")
+label <- paste(label, ",", sep = "")
+label <- paste(label, weight.piepercent)
+label <- paste(label, "%", sep="")
+pie(slice, labels = label, main = "GMVP Portfolio Weight")
+```
+
+\newpage
+
+## Back Testing 
+
+We held the first 80% of the dataset to train the model, and tested it on the more recent 20% of the dataset. The test sample ranges from Feb 13 2018 to Mar 01 2022 and the results of the test are as follows. 
+
+```{r Backtesting, echo=FALSE, out.height="900px"}
+#Use test sample
+bt.sample <- full.sample
+port <- xts(bt.sample[2:19], order.by = bt.sample$x)
+colnames(port) <- c("mkt", "rf", "AGG", "SCHP", "VCSH", "BNDX", "VWOB", "1306", "VOO", "VO", "VSS", "VGK", "VWO", "1343", "VNQ", "VNQI", "IAU", "BCI")
+
+# max returns
+max_port <- port[ , names]
+max_port <- reclass(coredata(max_port) %*% maxWeights, match.to = max_port)
+
+# min var
+min_port <- port[, names]
+min_port <- reclass(coredata(min_port) %*% mvpWeights, match.to = min_port)
+
+# tangency
+tan_port <- port[, names]
+tan_port <- reclass(coredata(tan_port) %*% tangencyWeights, match.to = tan_port)
+
+# # equal weighted
+# eqlwt <- port[, names]
+# eqlwt <- reclass(coredata(eqlwt) %*% rep(1 / 16, 16), match.to = eqlwt)
+
+# Compare against mkt
+MARKET <- port[ , c("mkt")]
+MARKET <- reclass(coredata(MARKET) %*% rep(1 / ncol(MARKET), ncol(MARKET)), match.to = MARKET)
+
+# charting
+charts.PerformanceSummary(merge(tan_port, max_port, min_port, MARKET), main = "Performance of Portfolios against Market Portfolio", geometric = FALSE)
+
+```
+
+```{r First Sample test, include=FALSE}
+#Use test sample
+bt.sample <- test.sample
+port <- xts(bt.sample[2:19], order.by = bt.sample$x)
+colnames(port) <- c("mkt", "rf", "AGG", "SCHP", "VCSH", "BNDX", "VWOB", "1306", "VOO", "VO", "VSS", "VGK", "VWO", "1343", "VNQ", "VNQI", "IAU", "BCI")
+
+# max returns
+max_port <- port[ , names]
+max_port <- reclass(coredata(max_port) %*% maxWeights, match.to = max_port)
+
+# min var
+min_port <- port[, names]
+min_port <- reclass(coredata(min_port) %*% mvpWeights, match.to = min_port)
+
+# tangency
+tan_port <- port[, names]
+tan_port <- reclass(coredata(tan_port) %*% tangencyWeights, match.to = tan_port)
+
+# equal weighted
+eqlwt <- port[, names]
+eqlwt <- reclass(coredata(eqlwt) %*% rep(1 / 16, 16), match.to = eqlwt)
+
+# Compare against mkt
+MARKET <- port[ , c("mkt")]
+MARKET <- reclass(coredata(MARKET) %*% rep(1 / ncol(MARKET), ncol(MARKET)), match.to = MARKET)
+
+# charting
+charts.PerformanceSummary(merge(tan_port, max_port, min_port, MARKET), geometric = FALSE)
+
+```
+
+
+```{r Second Sample Test, include=FALSE}
+#Use test sample
+bt.sample2 <- test.sample2
+port2 <- xts(bt.sample2[2:19], order.by = bt.sample2$x)
+colnames(port2) <- c("mkt", "rf", "AGG", "SCHP", "VCSH", "BNDX", "VWOB", "1306", "VOO", "VO", "VSS", "VGK", "VWO", "1343", "VNQ", "VNQI", "IAU", "BCI")
+
+# max returns
+max_port2 <- port2[ , names]
+max_port2 <- reclass(coredata(max_port2) %*% maxWeights, match.to = max_port2)
+
+# min var
+min_port2 <- port2[, names]
+min_port2 <- reclass(coredata(min_port2) %*% mvpWeights, match.to = min_port2)
+
+# tangency
+tan_port2 <- port2[, names]
+tan_port2 <- reclass(coredata(tan_port2) %*% tangencyWeights, match.to = tan_port2)
+
+# # equal weighted
+# eqlwt2 <- port2[, names]
+# eqlwt2 <- reclass(coredata(eqlwt2) %*% rep(1 / 16, 16), match.to = eqlwt2)
+
+# Compare against mkt
+MARKET2 <- port2[ , c("mkt")]
+MARKET2 <- reclass(coredata(MARKET2) %*% rep(1 / ncol(MARKET2), ncol(MARKET2)), match.to = MARKET2)
+
+# charting
+charts.PerformanceSummary(merge(tan_port2, max_port2, min_port2, MARKET2), geometric = FALSE)
+
+```
+
+The aggressive portfolio (max_port), moderate portfolio (tan_port) and conservative portfolio (min_port) yield cumulative returns that were comparable or better than the market portfolio (MARKET) for the first half of the sample, but only the aggressive portfolio matched the market portfolio's rise, illustrating the difference in volatility.
+
+\newpage
+
+## Currency Hedge 
+
+Given that the US interest rate is expected to rise, analysts forsee that the USD will continue to appreciate against the Yen, making it favourable for Japanese domestic returns. Furthermore, hedging the USD currency may add even more volatility to our portfolio. Thus, we believe it is better to accept the currency risk and not hedge the USD currency.
+
+\newpage    
+
+## Appendix
+```{r fee2, echo=FALSE, warning=FALSE}
+bar_fees <- ggplot(data=data_core,aes(x=data_core$ETF,y=data_core$Fees)) +
+  geom_bar(stat="identity",fill="dodgerblue")+
+  geom_text(aes(label=data_core$Fees),vjust=2,color="white",size=2)+
+  xlab("ETFs")+ylab("Fees")+
+  ggtitle("ETF fees")
+bar_fees
+```
+
+```{r liquidity2, include=FALSE, warning = FALSE}
+bar_liquidity <- ggplot(data=data_core,aes(x=data_core$ETF,y=data_core$ADV30)) +
+  geom_bar(stat="identity",fill="dodgerblue")+
+  xlab("ETFs")+ylab("Average Daily Volume")+
+  ggtitle("ETF ADV")
+bar_liquidity
+```
+
+```{r te2, out.height="700px",echo=FALSE, warning=FALSE}
+bar_benchmark <- ggplot(data=data_core,aes(x=data_core$ETF,y=data_core$`TE`)) +
+  geom_bar(stat="identity",fill="dodgerblue")+
+  xlab("ETFs")+ylab("Median Tracking Error")+
+  ggtitle("Median Tracking Error of ETFs for 12 Months")
+  
+bar_benchmark
+```
+
+```{r benchmark2, out.height="700px", echo=FALSE, warning=FALSE}
+bar_benchmark <- ggplot(data=data_core,aes(x=data_core$ETF,y=data_core$`Benchmark(5Y)`)) +
+  geom_bar(stat="identity",fill="dodgerblue")+
+  xlab("ETFs")+ylab("Benchmark(%)")+
+  ggtitle("ETFs Perfomance against Benchmark for 5 Years")
+  
+bar_benchmark
+
+```
+
+\newpage
+
+USD JPY exchange rate:
+
+```{r currency2, echo=FALSE, out.height= "200px", warning=FALSE}
+data.ret <- xts(data_fx[,7], 
+    order.by = as.Date(data_fx$x)
+                   )
+#cumulative returns of USD JPY
+chart.CumReturns(data.ret, colorset = "dodgerblue")
+
+```
+
+```{r capmMean2, out.height="700px", echo=FALSE}
+names <- c("AGG", "SCHP", "VCSH", "BNDX", "VWOB", "1306", "VOO", "VO", "VSS", "VGK", "VWO", "1343", "VNQ", "VNQI", "IAU", "BCI")
+
+betas <- rep(0,16)
+alphas <- rep(0,16)
+avgReturns <- rep(0,16)
+capm <- rep(0,16)
+epsilons <- rep(0,16)
+
+Rm <- data_returns$mkt - data_returns$rf
+jp <- c(6,12)
+for(j in 1:16){
+  if (!(j %in% jp)) {
+  Rj <- as.numeric(unlist((((1 + data_returns[,3+j]) * ( 1 + data_fx[,7])) - 1))) - as.numeric(unlist(data_returns[,3]))
+} else {
+   Rj <- as.numeric(unlist(data_returns[,3+j])) - as.numeric(unlist(data_returns[,3]))
+}
+  result <- lm(Rj ~ Rm)
+  epsilons[j] <- sigma(result)
+  result_summary <- summary(result)
+  coefficents <- coef(result_summary)
+  betas[j] <- coefficents[2,1]
+  alphas[j] <- coefficents[1,1]
+  capm[j] <- alphas[j] + betas[j] * mean(Rm)
+}
+names(capm) <- names
+names(betas) <- names
+names(alphas) <- names
+names(epsilons) <- names
+
+capm_new <- cbind(capm)
+table <- kable(capm_new, col.names = c("mu CAPM"))
+table
+```
+
+``` {r Converting to currency-adjusted returns, echo=FALSE}
+jp <- c(6,12)
+# jp equity is the 6th and 12th
+converted_returns <- data_returns[,1:3]
+# converted_returns
+for (j in 1:16) {
+  if (!(j %in% jp)) {
+    # if jp equity then convert
+    Rj <- as.numeric(unlist((((1 + data_returns[,3+j]) * ( 1 + data_fx[,7])) - 1))) - as.numeric(unlist(data_returns[,3]))
+  } else {
+       Rj <- as.numeric(unlist(data_returns[,3+j])) - as.numeric(unlist(data_returns[,3]))
+  }
+  m1 <- matrix(Rj)
+  colnames(m1) <- paste(colnames(data_returns[,3 + j])  , "converted", sep=" ")
+  converted_returns <- cbind(converted_returns,m1)
+}
+
+target.rows <- ceiling(nrow(converted_returns) * 0.8)
+target.rows2 <- ceiling(target.rows + ceiling(nrow(converted_returns) * 0.1))
+
+start <- target.rows
+stop <- target.rows2 - 1
+test.sample <- converted_returns[start : stop, ]
+test.sample[is.na(test.sample)] <- 0
+
+start <- target.rows2 + 1
+stop <- nrow(converted_returns)
+test.sample2 <- converted_returns[(target.rows2 + 1) : nrow(converted_returns), ]
+test.sample2[is.na(test.sample2)] <- 0
+
+ETF_ret <- as.timeSeries(converted_returns[,c(-1,-2,-3, -11)], order.by = as.Date(converted_returns$x, "%Y-%m-%d"))
+# ETF_ret[is.na(ETF_ret)] <- 0
+names <- c("AGG", "SCHP", "VCSH", "BNDX", "VWOB", "1306", "VOO", "VSS", "VGK", "VWO", "1343", "VNQ", "VNQI", "IAU", "BCI")
+colnames(ETF_ret) <- names
+# ETF_ret
+```
+
+```{r effective frontier, echo=FALSE}
+spec <- portfolioSpec()
+setNFrontierPoints(spec) <- 100
+constraints <- c("minW[1:15]=0.01", "maxW[1:15]=0.5")
+effFrontier <- portfolioFrontier(ETF_ret, spec = spec, constraints = constraints)
+
+# Make a plot selection (or 0 to exit): 
+# 
+# 1:   Plot Efficient Frontier
+# 2:   Add Minimum Risk Portfolio
+# 3:   Add Tangency Portfolio
+# 4:   Add Risk/Return of Single Assets
+# 5:   Add Equal Weights Portfolio
+# 6:   Add Two Asset Frontiers [LongOnly Only]
+# 7:   Add Monte Carlo Portfolios
+# 8:   Add Sharpe Ratio [Markowitz PF Only]
+
+plot(effFrontier, c(1, 2, 3, 5, 7))
+
+# Plot Frontier Weights (Can adjust number of points)
+frontierWeights <- getWeights(effFrontier) #get allocations for each instrument for each point on the efficient frontier
+colnames(frontierWeights) <- names
+write.csv(frontierWeights, "frontier_weights.csv")
+risk_return <- frontierPoints(effFrontier)
+# write.csv(risk_return, "risk_return.csv")
+
+#output correlation and covariance matrix
+cor_matrix <- cor(ETF_ret)
+cov_matrix <- cov(ETF_ret)
+# write.csv(cov_matrix, "covmatrix.csv")
+
+#Annualize Data
+riskReturnPoints <- frontierPoints(effFrontier) # get risk and return values for points on the efficient frontier
+annualizedPoints <- data.frame(targetRisk=riskReturnPoints[, "targetRisk"] * sqrt(252),
+                               targetReturn=riskReturnPoints[, "targetReturn"] * sqrt(252))
+plot(annualizedPoints)
+
+# plot Sharpe ratios for each point on the efficient frontier
+riskFreeRate <- -0.00116
+
+plot((annualizedPoints[, "targetReturn"]-riskFreeRate) / annualizedPoints[, "targetRisk"], 
+     xlab = "point on efficient frontier", 
+     ylab = "Sharpe ratio")
+
+#Plot frontier weights
+barplot(t(frontierWeights), main="Frontier Weights", col=cm.colors(ncol(frontierWeights)+2), legend=colnames(frontierWeights))
+
+# Get minimum variance portfolio
+spec <- portfolioSpec()
+setRiskFreeRate(spec) <- riskFreeRate
+mvp <- minriskPortfolio(ETF_ret, spec = spec, constraints = constraints)
+mvpWeights <- getWeights(mvp)
+#barplot(mvpWeights, main="MVP Weights", col=mvpWeights, legend=colnames(mvpWeights))
+
+# Get tangency portfolio
+spec <- portfolioSpec()
+setRiskFreeRate(spec) <- riskFreeRate
+tangencyPort <- tangencyPortfolio(ETF_ret, spec = spec, constraints = constraints)
+tangencyWeights <- getWeights(tangencyPort)
+
+# Get max returns portfolio weights
+maxWeights <- frontierWeights[50, ]
+
+# Visualizing portfolios on frontier
+plot(effFrontier, c(1, 2, 3))
+points(riskReturnPoints[50], riskReturnPoints[50, "targetReturn"], col="green", pch=16, cex=1)
+text(riskReturnPoints[50], riskReturnPoints[50, "targetReturn"], labels="aggressive portfolio", pos=4)
+text(riskReturnPoints[13], riskReturnPoints[13, "targetReturn"], labels="conservative portfolio", pos=4)
+text(riskReturnPoints[38], riskReturnPoints[38, "targetReturn"], labels="moderate portfolio", pos=4)
+
+```
+
+
